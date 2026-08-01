@@ -1,0 +1,163 @@
+// Microcontroller: XIAO_ESP32-C3
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+
+// Display settings
+#define DISPLAY_WIDTH 128
+#define DISPLAY_HEIGHT 64
+#define OLED_RESET -1
+#define I2C_ADDRESS 0x3C
+#define SDA_PIN 6 // D4
+#define SCL_PIN 7 // D5
+
+// Initialize display
+Adafruit_SSD1306 display(DISPLAY_WIDTH, DISPLAY_HEIGHT, &Wire, OLED_RESET);
+
+
+// Speed detection settings
+#define REED_SWITCH_PIN 21 // D6
+#define TIRE_RADIUS 0.33f
+#define FULL_REVOLUTION TIRE_RADIUS * PI * 2
+#define MX_SPEED 12 // (m/s) ~ 36 (km/h) // Max speed supported for detection
+                                         // Varies depending on the reed switch being used 
+#define DEB_DELAY (int)(1000000 * (FULL_REVOLUTION / MX_SPEED)) // Delay for debouncing
+
+
+// States
+typedef enum {
+  WAITING,
+  READING
+} State;
+
+
+// Variables
+int currBatteryLevel = 100;
+int lastBatteryLevel = currBatteryLevel;
+
+int currSpeed = 0;
+int lastSpeed = currSpeed;
+
+bool reedSwitchValue = LOW;
+bool hasFallen = false;
+
+int64_t lastReedRise = 0;
+int64_t currTime = 0; 
+
+State state = WAITING;
+
+
+void 
+updateDisplay() {
+ 
+  display.clearDisplay();
+  
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // Battery value
+  display.setCursor(85, 0); 
+  display.print(currBatteryLevel);
+  display.print(F("%"));
+
+  // Battery icon
+  display.drawRect(110, 0, 15, 8, SSD1306_WHITE);
+  display.fillRect(125, 2, 2, 4, SSD1306_WHITE);
+  
+  // Battery level logic
+  int barWidth = map(constrain(currBatteryLevel, 0, 100), 0, 100, 0, 11);
+  display.fillRect(112, 2, barWidth, 4, SSD1306_WHITE);
+
+  display.setTextSize(6); 
+
+  // Center speed on display
+  if (currSpeed < 10.0) {
+    display.setCursor(45, 16);
+  } else {
+    display.setCursor(10, 16);
+  }
+
+  // Speed value
+  display.print((int)currSpeed); 
+
+  // Unit
+  display.setTextSize(2);
+  display.setCursor(94, 50);
+  display.print(F("km/h"));
+
+  display.display();
+}
+
+
+void
+updateSpeed()
+{
+    currSpeed = (int)((3600000*FULL_REVOLUTION) / (currTime - lastReedRise));
+}
+
+
+void
+updateBattery()
+{
+  // Battery logic not yet implemented  
+}
+
+
+void
+setup() {
+  Serial.begin(115200);
+  Wire.begin(SDA_PIN, SCL_PIN);
+
+  // Init display
+  if (!display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDRESS)) {
+    Serial.println(F("[ERROR]: Unable to initialize display"));
+    for (;;);
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.display();
+
+  pinMode(REED_SWITCH_PIN, INPUT_PULLDOWN);
+
+  updateDisplay();
+}
+
+
+void
+loop() {
+
+  reedSwitchValue = digitalRead(REED_SWITCH_PIN);
+  currTime = esp_timer_get_time();
+
+  // State logic
+  switch(state)
+  {
+    // Waits for the debouncing delay
+    case WAITING:
+      if(currTime - lastReedRise > DEB_DELAY) state = READING;
+      break;
+
+    // Detects reed switch rise
+    case READING:
+      if(!reedSwitchValue) hasFallen = true;
+      if(reedSwitchValue & hasFallen)
+      {
+        updateSpeed();
+        lastReedRise = currTime;
+        state = WAITING;  
+        hasFallen = false;
+      }
+  }
+
+  updateBattery();
+
+  // Only updates display if battery level or speed changed
+  if(currSpeed != lastSpeed || currBatteryLevel != lastBatteryLevel)
+  {
+    lastSpeed = currSpeed;
+    lastBatteryLevel = currBatteryLevel;
+    updateDisplay();  
+  }
+}

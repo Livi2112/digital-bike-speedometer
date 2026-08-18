@@ -1,7 +1,7 @@
 # digital-bike-speedometer
 Simple digital speedometer for bikes made with an *ESP32*, a *Display* and a *Reed Switch*.
 
-# The Prototype
+# The Idea
 ![Prototype](assets/Prototype.jpeg)
 
 # How it works
